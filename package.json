@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@transxact/node": "^0.2.36",
+    "@transxact/react": "file:../../sdks/transxact-react/transxact-react-0.0.0.tgz",
     "next": "16.3.6",
     "react": "19.2.8",
     "react-dom": "19.2.8"

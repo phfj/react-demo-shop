@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { CheckoutButton, TransxactProvider } from "@transxact/react";
 
 export default function Home() {
   return (
