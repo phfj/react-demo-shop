@@ -10,7 +10,7 @@ export default function CartPage() {
         <TransxactProvider createSessionUrl="/api/checkout" retrieveSessionUrl="/api/checkout">
             <main style={{ padding: 32, fontFamily: "sans-serif" }}>
                 <h1>🛒 Demo Shop</h1>
-                <p>1 × T-shirt — FJD 25.00</p>
+                <p>1 × T-shirt — FJD 2.00</p>
 
                 <CheckoutButton payload={{ orderId: "order_1" }} onError={(e) => setError(e.message)}>
                     Pay with M-PAiSA or MyCash

@@ -1,44 +1,59 @@
-// FAKE Merchant backend: stands in for @transxact/node until Step 7.
+// REAL Merchant backend: talks to Transxact with your secret key. Server-only.
+import { TransxactApiClient, TransxactApiError } from "@transxact/node";
 
-// Prices live on the server. The browser only ever sends an orderId.
+const transxact = new TransxactApiClient({
+    environment: process.env.TRANSXACT_API_URL!,
+    headers: { Authorization: `Bearer ${process.env.TRANSXACT_SECRET_KEY}`},
+});
+
+// Prices live here, never on the browser.
 const ORDERS: Record<string, { totalCents: number }> = {
-    order_1: { totalCents: 2500 },
+    order_1: { totalCents: 200 }, //FJD: 2.00
 };
 
-// How many times each session has been looked up, so we can pretend it's "pending" for a bit.
-const lookups = new Map<string, number>();
+function apiErrorResponse(label: string, error: unknown){
+    if(error instanceof TransxactApiError){
+        console.error(`[${label}] Transxact said ${error.statusCode}:`, error.body);
+        return Response.json({ error: `${label}_failed`}, { status:error.statusCode ?? 502 });
+    }
+    console.error(`[${label}] unexpected error:`, error);
+    return Response.json({ error: `${label}_failed`},{status: 502});
+}
 
 // CREATE: called when the Customer clicks Pay.
 export async function POST(request: Request) {
-    const idempotencyKey = request.headers.get("Idempotency-Key");
+    const idempotencyKey = request.headers.get("Idempotency-Key") ?? crypto.randomUUID();
     const { orderId } = await request.json();
-    console.log(`[create] orderId=${orderId} idempotencyKey=${idempotencyKey}`);
+    const order = ORDERS[orderId];
+    if (!order) return Response.json({ error: "unknown_order" }, { status: 404 });
 
-    if (!ORDERS[orderId]) {
-        return Response.json({ error: "unknown_order" }, { status: 404 });
+    const returnUrl = `${process.env.PUBLIC_BASE_URL}/checkout/return`;
+    try {
+        const session = await transxact.postV1CheckoutSessions({
+            "idempotency-key": idempotencyKey, // forward the browser's key
+            amount: order.totalCents,
+            currency: "FJD",
+            successUrl: returnUrl,
+            cancelUrl: returnUrl,
+            metadata: { orderId },
+        });
+        console.log(`[create] ${session.id} key=${idempotencyKey} -> ${session.hostedUrl}`);
+        return Response.json({ id: session.id, hostedUrl: session.hostedUrl });
+    } catch (error) {
+        return apiErrorResponse("create", error);
     }
-
-    const id = `cs_fake_${Date.now()}`;
-    // Real Transxact would return its own hosted page URL. We point at our fake one.
-    const hostedUrl = new URL(`/fake-hosted?session_id=${id}`, request.url).href;
-    return Response.json({ id, hostedUrl });
 }
 
 // RETRIEVE: called by the Return page to ask what actually happened.
 export async function GET(request: Request) {
     const id = new URL(request.url).searchParams.get("session_id");
     if (!id) return Response.json({ error: "missing_session_id" }, { status: 400 });
-
-    const count = (lookups.get(id) ?? 0) + 1;
-    lookups.set(id, count);
-
-    // The outcome is encoded at the end of the id by the fake hosted page, e.g. cs_fake_123_succeeded
-    const outcome = id.split("_").pop();
-    const finalStatus =
-        outcome === "succeeded" || outcome === "failed" || outcome === "cancelled" ? outcome : "pending";
-
-    // Pretend the payment is still processing for the first 2 lookups.
-    const status = count < 3 ? "pending" : finalStatus;
-    console.log(`[retrieve] ${id} lookup #${count} -> ${status}`);
-    return Response.json({ id, status });
+    try {
+        const session = await transxact.getV1CheckoutSessionsId({ id });
+        console.log(`[retrieve] ${id} -> ${session.status}`);
+        // Only send the browser what it needs.
+        return Response.json({ id: session.id, status: session.status, amount: session.amount });
+    } catch (error) {
+        return apiErrorResponse("retrieve", error);
+    }
 }
